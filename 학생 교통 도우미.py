@@ -1,9 +1,10 @@
+
 import streamlit as st
 from urllib.parse import quote
 from datetime import datetime
 
 st.set_page_config(
-    page_title=" | 스마트 교통 도우미",
+    page_title="스마트 교통 도우미",
     page_icon="🚌",
     layout="wide",
 )
