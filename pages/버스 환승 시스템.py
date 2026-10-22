@@ -1,11 +1,11 @@
 
 import streamlit as st
-from datetime import datetime, date, time, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-# -----------------------------
-# 기본 설정
-# -----------------------------
+# =====================================
+# 1. 기본 설정
+# =====================================
 st.set_page_config(
     page_title="버스 환승 도우미",
     page_icon="🚌",
@@ -15,103 +15,115 @@ st.set_page_config(
 KST = ZoneInfo("Asia/Seoul")
 
 
-def now_kst():
-    """한국 표준시를 반환합니다."""
+def get_now():
+    """현재 한국 시각을 반환합니다."""
     return datetime.now(KST)
 
 
-def format_datetime(value):
-    return value.strftime("%Y-%m-%d %H:%M:%S")
-
-
 def init_state():
+    """세션 상태를 안전하게 초기화합니다."""
     if "transfer_records" not in st.session_state:
-        st.session_state.transfer_records = []
+        st.session_state["transfer_records"] = []
+
+    if "exit_dt" not in st.session_state:
+        st.session_state["exit_dt"] = None
+
+    if "deadline" not in st.session_state:
+        st.session_state["deadline"] = None
 
 
 init_state()
 
-# -----------------------------
-# 상단 화면
-# -----------------------------
-now = now_kst()
+# =====================================
+# 2. 제목 및 현재 시각
+# =====================================
+now = get_now()
 
 st.title("🚌 버스 환승 도우미")
-st.caption("현재 시각 확인부터 환승 마감 계산까지")
+st.caption("환승 시간 계산부터 탑승 기록까지")
 
 with st.container(border=True):
     st.subheader("🕒 현재 한국 시각")
     st.markdown(f"## {now.strftime('%H:%M:%S')}")
     st.write(now.strftime("%Y년 %m월 %d일"))
-    if st.button("🔄 현재 시각 새로고침", use_container_width=True):
+
+    if st.button("🔄 현재 시각 갱신", use_container_width=True):
         st.rerun()
 
-st.info(
-    "현재 시각은 화면을 새로고침할 때 갱신됩니다. "
-    "아래 계산기의 남은 시간도 새로고침 후 다시 계산됩니다."
-)
+st.caption("현재 시각과 남은 시간은 화면을 갱신할 때 업데이트됩니다.")
 
-# -----------------------------
-# 환승 시간 계산기
-# -----------------------------
-st.header("⏱️ 환승 시간 계산")
+st.divider()
 
-with st.form("transfer_calculator"):
-    st.write("첫 번째 버스에서 내린 시각을 입력하세요.")
+# =====================================
+# 3. 환승 시간 계산
+# =====================================
+st.header("⏱️ 환승 시간 계산기")
 
+with st.form("transfer_form"):
+    st.write("첫 번째 버스에서 내린 날짜와 시각을 입력하세요.")
+
+    current = get_now()
     col1, col2 = st.columns(2)
 
     with col1:
         exit_date = st.date_input(
             "하차 날짜",
-            value=now.date(),
-            key="exit_date",
+            value=current.date(),
+            key="exit_date_input",
         )
 
     with col2:
         exit_time = st.time_input(
             "하차 시각",
-            value=now.time().replace(microsecond=0),
-            key="exit_time",
+            value=current.time().replace(
+                tzinfo=None,
+                microsecond=0,
+            ),
+            key="exit_time_input",
         )
 
-    allowed_minutes = st.select_slider(
-        "환승 허용 시간(분)",
+    allowed_minutes = st.selectbox(
+        "환승 허용 시간",
         options=[10, 15, 20, 30, 40, 60],
-        value=30,
+        index=3,
+        format_func=lambda x: f"{x}분",
     )
 
-    submitted = st.form_submit_button(
-        "환승 마감 시간 계산",
+    calculate = st.form_submit_button(
+        "환승 마감 시간 계산하기",
         use_container_width=True,
         type="primary",
     )
 
-if submitted:
+if calculate:
     try:
-        exit_dt = datetime.combine(
+        # Streamlit에서 입력받은 시각은 시간대 정보가 없는
+        # datetime으로 변환한 후 한국 시간대를 지정합니다.
+        naive_exit = datetime.combine(
             exit_date,
-            exit_time,
-            tzinfo=KST,
+            exit_time.replace(tzinfo=None),
         )
-        deadline = exit_dt + timedelta(minutes=allowed_minutes)
+        exit_dt = naive_exit.replace(tzinfo=KST)
 
-        st.session_state.exit_dt = exit_dt
-        st.session_state.deadline = deadline
-        st.session_state.allowed_minutes = allowed_minutes
+        deadline = exit_dt + timedelta(minutes=int(allowed_minutes))
+
+        st.session_state["exit_dt"] = exit_dt
+        st.session_state["deadline"] = deadline
+        st.session_state["allowed_minutes"] = int(allowed_minutes)
 
     except (ValueError, TypeError, OverflowError):
-        st.error("입력한 날짜와 시각을 확인한 뒤 다시 시도하세요.")
+        st.error("날짜 또는 시각을 확인한 후 다시 시도해 주세요.")
 
-# -----------------------------
-# 계산 결과
-# -----------------------------
-if "deadline" in st.session_state:
-    exit_dt = st.session_state.exit_dt
-    deadline = st.session_state.deadline
-    current = now_kst()
+# =====================================
+# 4. 계산 결과와 남은 시간
+# =====================================
+exit_dt = st.session_state["exit_dt"]
+deadline = st.session_state["deadline"]
 
-    st.subheader("📍 환승 상황")
+if exit_dt is not None and deadline is not None:
+    current = get_now()
+
+    st.subheader("📍 환승 상황판")
 
     with st.container(border=True):
         st.write("첫 번째 버스 하차 시각")
@@ -120,83 +132,98 @@ if "deadline" in st.session_state:
         st.write("환승 마감 시각")
         st.markdown(f"### {deadline.strftime('%Y-%m-%d %H:%M')}")
 
-        remaining_seconds = int((deadline - current).total_seconds())
+        remaining = int((deadline - current).total_seconds())
 
-        if remaining_seconds < 0:
+        if remaining < 0:
             st.error("⌛ 설정한 환승 시간이 지났습니다.")
+            elapsed = abs(remaining)
             st.write(
-                f"마감 시각보다 {abs(remaining_seconds) // 60}분 "
-                f"{abs(remaining_seconds) % 60}초 지났습니다."
+                f"마감 시각으로부터 "
+                f"{elapsed // 60}분 {elapsed % 60}초 경과"
             )
-        elif remaining_seconds == 0:
-            st.warning("환승 마감 시각입니다.")
-        else:
-            remaining_minutes = remaining_seconds // 60
-            remaining_secs = remaining_seconds % 60
 
-            if remaining_seconds <= 300:
-                st.warning("⚠️ 환승 마감이 5분 이내로 다가왔습니다.")
-            else:
-                st.success("✅ 설정한 환승 가능 시간 내입니다.")
+        elif remaining == 0:
+            st.warning("환승 마감 시각입니다.")
+
+        else:
+            minutes = remaining // 60
+            seconds = remaining % 60
 
             st.metric(
-                "남은 시간",
-                f"{remaining_minutes}분 {remaining_secs}초",
+                "환승 마감까지 남은 시간",
+                f"{minutes}분 {seconds}초",
             )
 
-        st.caption(
-            "계산 결과는 입력한 허용 시간을 기준으로 하며, "
-            "실제 교통카드의 환승 적용을 보장하지 않습니다."
-        )
+            if remaining <= 300:
+                st.warning("⚠️ 환승 마감이 5분 이내입니다.")
+            else:
+                st.success("✅ 설정한 환승 시간 안에 있습니다.")
 
-    # -----------------------------
-    # 환승 기록
-    # -----------------------------
-    st.subheader("📝 환승 기록")
+    st.caption(
+        "이 결과는 직접 설정한 시간에 따른 계산입니다. "
+        "실제 교통카드의 환승 인정 여부와 다를 수 있습니다."
+    )
 
-    col_a, col_b = st.columns(2)
+    # =====================================
+    # 5. 탑승 기록
+    # =====================================
+    st.subheader("📝 두 번째 버스 탑승 기록")
 
-    with col_a:
-        if st.button("두 번째 버스 탑승 기록", use_container_width=True):
-            boarding_time = now_kst()
-            st.session_state.transfer_records.insert(
-                0,
-                {
-                    "기록 시각": boarding_time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "최초 하차": exit_dt.strftime("%Y-%m-%d %H:%M"),
-                    "환승 마감": deadline.strftime("%Y-%m-%d %H:%M"),
-                    "탑승 당시 판정": (
-                        "설정 시간 내"
-                        if boarding_time <= deadline
-                        else "설정 시간 초과"
-                    ),
-                },
-            )
-            st.success("두 번째 버스 탑승 시각을 기록했습니다.")
+    if st.button(
+        "🚌 지금 탑승한 것으로 기록",
+        use_container_width=True,
+    ):
+        boarding_time = get_now()
 
-    with col_b:
-        if st.button("계산 결과 초기화", use_container_width=True):
-            for key in ("exit_dt", "deadline", "allowed_minutes"):
-                st.session_state.pop(key, None)
-            st.rerun()
+        record = {
+            "탑승 기록 시각": boarding_time.strftime(
+                "%Y-%m-%d %H:%M:%S"
+            ),
+            "첫 버스 하차": exit_dt.strftime("%Y-%m-%d %H:%M"),
+            "환승 마감": deadline.strftime("%Y-%m-%d %H:%M"),
+            "설정 시간 기준": (
+                "시간 내"
+                if boarding_time <= deadline
+                else "시간 초과"
+            ),
+        }
 
-    if st.session_state.transfer_records:
+        st.session_state["transfer_records"].insert(0, record)
+        st.success("탑승 기록을 저장했습니다.")
+
+    st.divider()
+
+    # =====================================
+    # 6. 기록 목록
+    # =====================================
+    st.subheader("📋 환승 기록 목록")
+
+    records = st.session_state["transfer_records"]
+
+    if records:
         st.dataframe(
-            st.session_state.transfer_records,
+            records,
             use_container_width=True,
             hide_index=True,
         )
 
-        if st.button("전체 기록 삭제"):
-            st.session_state.transfer_records = []
+        if st.button("전체 환승 기록 삭제"):
+            st.session_state["transfer_records"] = []
             st.rerun()
     else:
-        st.caption("아직 기록된 환승 내역이 없습니다.")
+        st.info("아직 저장된 환승 기록이 없습니다.")
 
-# -----------------------------
-# 하단 안내
-# -----------------------------
+    if st.button("계산 결과 초기화"):
+        st.session_state["exit_dt"] = None
+        st.session_state["deadline"] = None
+        st.rerun()
+
+else:
+    st.info("하차 시각을 입력하고 계산 버튼을 눌러 주세요.")
+
+# =====================================
+# 7. 하단 안내
+# =====================================
 st.divider()
-st.caption(
-    "버스 환승 도우미 · 시간 계산 및 개인 기록 관리용"
-)
+st.caption("버스 환승 도우미 | 한국 표준시 기준")
+st.caption("환승 기록은 현재 앱 세션에 저장되며 영구 보관되지 않습니다.")
